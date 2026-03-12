@@ -1,0 +1,126 @@
+@import "tailwindcss";
+
+/* ─── Design Tokens ────────────────────────────────────── */
+@theme {
+  --color-dark-900: #0a0a0f;
+  --color-dark-800: #12121a;
+  --color-dark-700: #1a1a26;
+  --color-dark-600: #22222f;
+  --color-dark-500: #2a2a3a;
+
+  --color-accent-500: #6366f1;
+  --color-accent-400: #818cf8;
+  --color-accent-300: #a5b4fc;
+
+  --color-success-500: #22c55e;
+  --color-danger-500: #ef4444;
+  --color-warning-500: #f59e0b;
+
+  --font-display: "Outfit", system-ui, sans-serif;
+  --font-body: "Inter", system-ui, sans-serif;
+}
+
+/* ─── Base ─────────────────────────────────────────────── */
+body {
+  font-family: var(--font-body);
+  background: var(--color-dark-900);
+  color: #e2e8f0;
+  margin: 0;
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* ─── Glass Card ───────────────────────────────────────── */
+.glass {
+  background: rgba(18, 18, 26, 0.6);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(99, 102, 241, 0.15);
+  border-radius: 1rem;
+}
+
+.glass-light {
+  background: rgba(99, 102, 241, 0.08);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(99, 102, 241, 0.12);
+  border-radius: 0.75rem;
+}
+
+/* ─── Gradient Mesh Background ─────────────────────────── */
+.mesh-bg {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  background:
+    radial-gradient(ellipse 600px 400px at 20% 30%, rgba(99, 102, 241, 0.12), transparent),
+    radial-gradient(ellipse 500px 500px at 80% 70%, rgba(139, 92, 246, 0.08), transparent),
+    radial-gradient(ellipse 400px 300px at 50% 50%, rgba(34, 197, 94, 0.04), transparent);
+}
+
+/* ─── Keyframes ────────────────────────────────────────── */
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes pulse-ring {
+  0%   { transform: scale(1);   opacity: 0.6; }
+  50%  { transform: scale(1.2); opacity: 0; }
+  100% { transform: scale(1);   opacity: 0; }
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-6px); }
+}
+
+.animate-fade-in  { animation: fade-in 0.5s ease-out both; }
+.animate-pulse-ring { animation: pulse-ring 2s ease-out infinite; }
+.animate-float    { animation: float 3s ease-in-out infinite; }
+
+/* ─── Video ────────────────────────────────────────────── */
+.video-container {
+  position: relative;
+  border-radius: 1rem;
+  overflow: hidden;
+  background: var(--color-dark-700);
+  box-shadow: 0 0 40px rgba(99, 102, 241, 0.1);
+}
+
+.video-container video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* ─── Control Button ───────────────────────────────────── */
+.control-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 3.5rem;
+  height: 3.5rem;
+  border-radius: 9999px;
+  border: none;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  color: white;
+  font-size: 1.25rem;
+}
+
+.control-btn:hover {
+  transform: scale(1.1);
+}
+
+.control-btn:active {
+  transform: scale(0.95);
+}
+
+/* ─── Scrollbar ────────────────────────────────────────── */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: rgba(99, 102, 241, 0.3);
+  border-radius: 3px;
+}
