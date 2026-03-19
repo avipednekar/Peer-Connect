@@ -16,7 +16,9 @@ async function request(endpoint, options = {}) {
   const data = await res.json();
 
   if (!res.ok) {
-    throw new Error(data.error || "Request failed");
+    const err = new Error(data.error || "Request failed");
+    err.data = data;
+    throw err;
   }
 
   return data;
@@ -30,6 +32,18 @@ export const api = {
       body: JSON.stringify({ name, email, password }),
     }),
 
+  verifyOTP: (email, otp) =>
+    request("/auth/verify-otp", {
+      method: "POST",
+      body: JSON.stringify({ email, otp }),
+    }),
+
+  resendOTP: (email) =>
+    request("/auth/resend-otp", {
+      method: "POST",
+      body: JSON.stringify({ email }),
+    }),
+
   login: (email, password) =>
     request("/auth/login", {
       method: "POST",
@@ -37,6 +51,18 @@ export const api = {
     }),
 
   getMe: () => request("/auth/me"),
+
+  // Meetings
+  createMeeting: (roomId) =>
+    request("/meetings", {
+      method: "POST",
+      body: JSON.stringify({ roomId }),
+    }),
+
+  getMeeting: (roomId) => request(`/meetings/${roomId}`),
+
+  endMeeting: (roomId) =>
+    request(`/meetings/${roomId}/end`, { method: "POST" }),
 
   // Friends
   getFriends: () => request("/friends"),

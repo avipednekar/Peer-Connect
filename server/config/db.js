@@ -1,21 +1,15 @@
 import mongoose from "mongoose";
 
-export const connectDB = async () => {
+const connectDB = async () => {
   try {
-    if (!process.env.MONGODB_URI) {
-      throw new Error(
-        "MONGODB_URI is extremely required but not defined in .env",
-      );
-    }
-
-    const uri = process.env.MONGODB_URI.trim();
-    const conn = await mongoose.connect(uri, {
-      serverSelectionTimeoutMS: 10000,
-    });
-
-    console.log(`📦 Connected to MongoDB: ${conn.connection.host}`);
-  } catch (err) {
-    console.error("❌ MongoDB connection error:", err.message);
+    const conn = await mongoose.connect(
+      `${process.env.MONGODB_URI}/Peer_Connect`,
+    );
+    console.log(`Successfully connected to MongoDB: ${conn.connection.host}`);
+  } catch (error) {
+    console.error(`MongoDB connection error: ${error.message}`);
     process.exit(1);
   }
 };
+
+export { connectDB };

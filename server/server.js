@@ -1,18 +1,20 @@
 import dotenv from "dotenv";
-dotenv.config({ path: import.meta.dirname + "/../.env" });
+dotenv.config();
 
 import express from "express";
 import { createServer } from "http";
 import { Server } from "socket.io";
 import { connectDB } from "./config/db.js";
+import { createWorker } from "./config/mediasoup.js";
 import { authenticateSocket } from "./middleware/auth.js";
 import { setupSocketHandlers } from "./sockets/socketHandlers.js";
 
 import authRoutes from "./routes/auth.js";
 import friendsRoutes from "./routes/friends.js";
 import usersRoutes from "./routes/users.js";
+import meetingsRoutes from "./routes/meetings.js";
 
-// Initialize express app and HTTP server
+// Initialize Express app and HTTP server
 const app = express();
 const server = createServer(app);
 
@@ -27,7 +29,7 @@ const io = new Server(server, {
   },
 });
 
-// Configure Socket.IO authentication and handlers
+// Socket.IO auth + handlers
 io.use(authenticateSocket);
 setupSocketHandlers(io);
 
@@ -37,16 +39,16 @@ app.use(express.json());
 // ─── API Routes ───────────────────────────────────────
 app.use("/api/auth", authRoutes);
 app.use("/api/friends", friendsRoutes);
-app.use("/api/users", usersRoutes); // Online status moved to users routes
+app.use("/api/users", usersRoutes);
+app.use("/api/meetings", meetingsRoutes);
 
-// ─── Start Server ──────────────────────────────────────
+// ─── Start Server ─────────────────────────────────────
 const PORT = process.env.PORT || 4000;
 
 const startServer = async () => {
-  // Connect to Database first
   await connectDB();
+  await createWorker();
 
-  // Start listening
   server.listen(PORT, () => {
     console.log(`🚀 Server running on http://localhost:${PORT}`);
   });

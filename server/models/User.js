@@ -1,6 +1,7 @@
 import mongoose from "mongoose";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
+import crypto from "crypto";
 
 const userSchema = new mongoose.Schema({
   name: {
@@ -21,6 +22,18 @@ const userSchema = new mongoose.Schema({
     type: String,
     required: true,
     minlength: 6,
+  },
+  isVerified: {
+    type: Boolean,
+    default: false,
+  },
+  otp: {
+    type: String,
+    default: null,
+  },
+  otpExpiresAt: {
+    type: Date,
+    default: null,
   },
   friends: [
     {
@@ -52,10 +65,27 @@ userSchema.methods.generateAuthToken = function () {
   });
 };
 
-// Remove password from JSON output
+// Generate 6-digit OTP
+userSchema.methods.generateOTP = function () {
+  const otp = crypto.randomInt(100000, 999999).toString();
+  this.otp = otp;
+  this.otpExpiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+  return otp;
+};
+
+// Verify OTP
+userSchema.methods.verifyOTP = function (candidateOTP) {
+  if (!this.otp || !this.otpExpiresAt) return false;
+  if (new Date() > this.otpExpiresAt) return false;
+  return this.otp === candidateOTP;
+};
+
+// Remove sensitive fields from JSON output
 userSchema.methods.toJSON = function () {
   const obj = this.toObject();
   delete obj.password;
+  delete obj.otp;
+  delete obj.otpExpiresAt;
   return obj;
 };
 
