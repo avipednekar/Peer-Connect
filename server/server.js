@@ -40,7 +40,7 @@ app.use("/api/friends", friendsRoutes);
 app.use("/api/users", usersRoutes); // Online status moved to users routes
 
 // ─── Start Server ──────────────────────────────────────
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 4000;
 
 const startServer = async () => {
   // Connect to Database first
