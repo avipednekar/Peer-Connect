@@ -1,51 +1,65 @@
-import { Mic, MicOff, Video, VideoOff, PhoneOff, DoorOpen } from "lucide-react";
+import { Mic, MicOff, Video, VideoOff, PhoneOff, DoorOpen, MonitorUp } from "lucide-react";
 
 export default function Controls({ isMuted, isVideoOff, onToggleMute, onToggleVideo, onLeave, isHost, onHostEnd }) {
   return (
-    <div className="flex items-center justify-center gap-3 animate-fade-in" style={{ animationDelay: "0.3s" }}>
+    <div className="flex items-center gap-2">
       {/* Mute / Unmute */}
       <button
         onClick={onToggleMute}
-        className="control-btn"
-        style={{ background: isMuted ? "#ef4444" : "rgba(99, 102, 241, 0.25)" }}
+        className="meeting-btn group"
+        data-active={!isMuted}
+        style={{ background: isMuted ? "rgba(239,68,68,0.9)" : "rgba(255,255,255,0.08)" }}
         title={isMuted ? "Unmute" : "Mute"}
         id="btn-toggle-mute"
       >
-        {isMuted ? <MicOff size={22} /> : <Mic size={22} />}
+        <span className="meeting-btn-icon">
+          {isMuted ? <MicOff size={20} /> : <Mic size={20} />}
+        </span>
+        <span className="meeting-btn-label">{isMuted ? "Unmute" : "Mute"}</span>
       </button>
 
       {/* Video On / Off */}
       <button
         onClick={onToggleVideo}
-        className="control-btn"
-        style={{ background: isVideoOff ? "#ef4444" : "rgba(99, 102, 241, 0.25)" }}
+        className="meeting-btn group"
+        data-active={!isVideoOff}
+        style={{ background: isVideoOff ? "rgba(239,68,68,0.9)" : "rgba(255,255,255,0.08)" }}
         title={isVideoOff ? "Turn on camera" : "Turn off camera"}
         id="btn-toggle-video"
       >
-        {isVideoOff ? <VideoOff size={22} /> : <Video size={22} />}
+        <span className="meeting-btn-icon">
+          {isVideoOff ? <VideoOff size={20} /> : <Video size={20} />}
+        </span>
+        <span className="meeting-btn-label">{isVideoOff ? "Start Video" : "Stop Video"}</span>
       </button>
 
-      {/* Leave / End Meeting — single button, different behaviour for host */}
+      {/* Divider */}
+      <div className="w-px h-8 bg-white/10 mx-1" />
+
+      {/* Leave / End Meeting */}
       {isHost ? (
         <button
           onClick={onHostEnd}
-          className="control-btn px-5 gap-2 flex items-center"
-          style={{ background: "#ef4444" }}
+          className="meeting-btn-end group"
           title="End Meeting for All"
           id="btn-end-meeting"
         >
-          <PhoneOff size={20} />
-          <span className="text-sm font-semibold hidden sm:inline">End All</span>
+          <span className="meeting-btn-icon">
+            <PhoneOff size={20} />
+          </span>
+          <span className="meeting-btn-label">End Meeting</span>
         </button>
       ) : (
         <button
           onClick={onLeave}
-          className="control-btn"
-          style={{ background: "#ef4444" }}
-          title="Leave call"
+          className="meeting-btn-leave group"
+          title="Leave Meeting"
           id="btn-leave-call"
         >
-          <DoorOpen size={22} />
+          <span className="meeting-btn-icon">
+            <DoorOpen size={20} />
+          </span>
+          <span className="meeting-btn-label">Leave</span>
         </button>
       )}
     </div>

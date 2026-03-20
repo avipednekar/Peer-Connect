@@ -94,7 +94,7 @@ export default function ChatPanel({ isOpen, onClose, socket, roomId, displayName
   if (!isOpen) return null;
 
   return (
-    <div className="absolute right-0 top-0 bottom-0 w-full sm:w-96 glass border-l border-dark-500/50 flex flex-col z-30 animate-fade-in">
+    <div className="w-full sm:w-80 md:w-96 bg-dark-800/95 border-l border-dark-600/50 flex flex-col z-30 animate-fade-in flex-shrink-0">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-dark-500/50">
         <div className="flex items-center gap-2">
