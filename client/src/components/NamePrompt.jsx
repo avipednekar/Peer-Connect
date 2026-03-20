@@ -1,13 +1,18 @@
 import { useState, useEffect, useRef } from "react";
 import { api } from "../api";
-import { Users, Crown, AlertTriangle } from "lucide-react";
+import { Users, Crown, AlertTriangle, Mic, MicOff, Video, VideoOff } from "lucide-react";
 
 export default function NamePrompt({ defaultName, roomId, onJoin }) {
   const [name, setName] = useState(defaultName || "");
   const [meetingInfo, setMeetingInfo] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [micOn, setMicOn] = useState(true);
+  const [camOn, setCamOn] = useState(true);
+  const [previewStream, setPreviewStream] = useState(null);
+  const videoPreviewRef = useRef(null);
   const inputRef = useRef(null);
 
+  // Fetch meeting info
   useEffect(() => {
     api.getMeeting(roomId)
       .then((data) => setMeetingInfo(data))
@@ -15,18 +20,59 @@ export default function NamePrompt({ defaultName, roomId, onJoin }) {
       .finally(() => setLoading(false));
   }, [roomId]);
 
+  // Start camera preview
   useEffect(() => {
-    inputRef.current?.focus();
+    let stream = null;
+
+    navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+      .then((s) => {
+        stream = s;
+        setPreviewStream(s);
+        if (videoPreviewRef.current) {
+          videoPreviewRef.current.srcObject = s;
+        }
+      })
+      .catch(() => {
+        // Permissions denied — disable toggles
+        setCamOn(false);
+        setMicOn(false);
+      });
+
+    return () => {
+      if (stream) {
+        stream.getTracks().forEach((t) => t.stop());
+      }
+    };
+  }, []);
+
+  // Sync preview with toggles
+  useEffect(() => {
+    if (!previewStream) return;
+    previewStream.getVideoTracks().forEach((t) => { t.enabled = camOn; });
+  }, [camOn, previewStream]);
+
+  useEffect(() => {
+    if (!previewStream) return;
+    previewStream.getAudioTracks().forEach((t) => { t.enabled = micOn; });
+  }, [micOn, previewStream]);
+
+  useEffect(() => {
+    if (!loading) inputRef.current?.focus();
   }, [loading]);
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    if (name.trim()) onJoin(name.trim());
+    if (!name.trim()) return;
+    // Stop preview — joinRoom will acquire its own stream
+    if (previewStream) {
+      previewStream.getTracks().forEach((t) => t.stop());
+    }
+    onJoin(name.trim(), { micOn, camOn });
   };
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-[300px]">
+      <div className="flex items-center justify-center min-h-screen">
         <div className="w-8 h-8 border-2 border-accent-400 border-t-transparent rounded-full animate-spin" />
       </div>
     );
@@ -41,9 +87,7 @@ export default function NamePrompt({ defaultName, roomId, onJoin }) {
             <AlertTriangle size={28} className="text-red-400" />
           </div>
           <h2 className="text-xl font-display font-bold text-white mb-2">Meeting Ended</h2>
-          <p className="text-sm text-gray-400">
-            This meeting has been ended by the host.
-          </p>
+          <p className="text-sm text-gray-400">This meeting has been ended by the host.</p>
         </div>
       </div>
     );
@@ -51,21 +95,61 @@ export default function NamePrompt({ defaultName, roomId, onJoin }) {
 
   return (
     <div className="flex items-center justify-center min-h-screen relative">
-      <div className="glass w-full max-w-md p-8 animate-fade-in relative z-10">
-        <div className="text-center mb-6">
-          <div className="w-14 h-14 rounded-2xl bg-accent-500/15 flex items-center justify-center mx-auto mb-4">
+      <div className="glass w-full max-w-lg p-8 animate-fade-in relative z-10">
+        <div className="text-center mb-5">
+          <div className="w-14 h-14 rounded-2xl bg-accent-500/15 flex items-center justify-center mx-auto mb-3">
             <Users size={24} className="text-accent-400" />
           </div>
           <h2 className="text-xl font-display font-bold text-white">Join Meeting</h2>
 
           {meetingInfo && (
-            <div className="mt-3 flex items-center justify-center gap-2 text-sm text-gray-400">
+            <div className="mt-2 flex items-center justify-center gap-2 text-sm text-gray-400">
               <Crown size={14} className="text-yellow-400" />
               <span>Hosted by <span className="text-white font-medium">{meetingInfo.hostName}</span></span>
             </div>
           )}
 
-          <p className="text-xs text-gray-500 mt-2 font-mono">Room: #{roomId}</p>
+          <p className="text-xs text-gray-500 mt-1 font-mono">Room: #{roomId}</p>
+        </div>
+
+        {/* Camera Preview */}
+        <div className="relative w-full aspect-video rounded-xl overflow-hidden bg-dark-700 mb-4">
+          <video
+            ref={videoPreviewRef}
+            autoPlay
+            playsInline
+            muted
+            className={`w-full h-full object-cover ${!camOn ? 'hidden' : ''}`}
+          />
+          {!camOn && (
+            <div className="absolute inset-0 flex items-center justify-center">
+              <div className="w-20 h-20 rounded-full bg-dark-500/80 flex items-center justify-center">
+                <span className="text-3xl font-display font-bold text-accent-400">
+                  {name?.[0]?.toUpperCase() || "?"}
+                </span>
+              </div>
+            </div>
+          )}
+
+          {/* Mic/Cam toggles overlaid on preview */}
+          <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex gap-2">
+            <button
+              onClick={() => setMicOn((v) => !v)}
+              className="w-10 h-10 rounded-xl flex items-center justify-center text-white transition-all"
+              style={{ background: micOn ? "rgba(99,102,241,0.35)" : "#ef4444" }}
+              title={micOn ? "Mute mic" : "Unmute mic"}
+            >
+              {micOn ? <Mic size={18} /> : <MicOff size={18} />}
+            </button>
+            <button
+              onClick={() => setCamOn((v) => !v)}
+              className="w-10 h-10 rounded-xl flex items-center justify-center text-white transition-all"
+              style={{ background: camOn ? "rgba(99,102,241,0.35)" : "#ef4444" }}
+              title={camOn ? "Turn off camera" : "Turn on camera"}
+            >
+              {camOn ? <Video size={18} /> : <VideoOff size={18} />}
+            </button>
+          </div>
         </div>
 
         <form onSubmit={handleSubmit}>

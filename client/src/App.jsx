@@ -12,7 +12,7 @@ import Controls from "./components/Controls";
 import ChatPanel from "./components/ChatPanel";
 import { useState, useRef, useEffect } from "react";
 import {
-  Loader, AlertCircle, Users, Crown, MessageSquare, PhoneOff,
+  Loader, AlertCircle, Users, Crown, MessageSquare,
 } from "lucide-react";
 
 function AppContent() {
@@ -23,6 +23,7 @@ function AppContent() {
     localVideoRef, participants, hostId,
     joinRoom, leaveRoom, hostEndMeeting, toggleMute, toggleVideo,
     onlineUsers, incomingCall, callFriend, acceptCall, rejectCall, socket,
+    setIsMuted, setIsVideoOff,
   } = useWebRTC(token);
 
   if (authLoading) {
@@ -100,6 +101,8 @@ function AppContent() {
               hostEndMeeting={hostEndMeeting}
               toggleMute={toggleMute}
               toggleVideo={toggleVideo}
+              setIsMuted={setIsMuted}
+              setIsVideoOff={setIsVideoOff}
               socket={socket}
             />
           }
@@ -112,7 +115,8 @@ function AppContent() {
 function RoomPage({
   user, connectionState, isMuted, isVideoOff, error, setError,
   participants, hostId, localVideoRef,
-  joinRoom, leaveRoom, hostEndMeeting, toggleMute, toggleVideo, socket,
+  joinRoom, leaveRoom, hostEndMeeting, toggleMute, toggleVideo,
+  setIsMuted, setIsVideoOff, socket,
 }) {
   const { roomId } = useParams();
   const navigate = useNavigate();
@@ -141,10 +145,11 @@ function RoomPage({
     return () => s.off("chat-message", handler);
   }, [socket]);
 
-  const handleJoinWithName = (name) => {
+  const handleJoinWithName = (name, mediaSettings) => {
     setDisplayName(name);
     setShowNamePrompt(false);
-    joinRoom(roomId, name);
+    // Pass initial media state to joinRoom
+    joinRoom(roomId, name, mediaSettings);
   };
 
   const handleLeave = () => {
@@ -159,7 +164,7 @@ function RoomPage({
 
   const isHost = user && hostId && user._id === hostId;
 
-  // Name prompt
+  // Name prompt with pre-join preview
   if (showNamePrompt && connectionState === "idle") {
     return (
       <div className="min-h-screen relative">
@@ -170,9 +175,9 @@ function RoomPage({
   }
 
   // Calculate grid layout
-  const totalVideos = 1 + participants.length; // local + remote
+  const totalVideos = 1 + participants.length;
   const gridCols =
-    totalVideos <= 1 ? "grid-cols-1" :
+    totalVideos <= 1 ? "grid-cols-1 max-w-3xl" :
     totalVideos <= 2 ? "grid-cols-1 md:grid-cols-2" :
     totalVideos <= 4 ? "grid-cols-2" :
     totalVideos <= 6 ? "grid-cols-2 lg:grid-cols-3" :
@@ -183,7 +188,7 @@ function RoomPage({
       <div className="mesh-bg" />
 
       {/* Header */}
-      <header className="relative z-10 flex items-center justify-between px-6 py-3">
+      <header className="relative z-10 flex items-center justify-between px-6 py-3 border-b border-dark-600/30">
         <h1 className="text-lg font-display font-bold bg-gradient-to-r from-accent-300 to-accent-400 bg-clip-text text-transparent">
           Peer Connect
         </h1>
@@ -206,7 +211,7 @@ function RoomPage({
 
       {/* Video Grid */}
       <main className="flex-1 relative z-10 flex items-center justify-center px-4 pb-4">
-        <div className={`w-full max-w-7xl grid ${gridCols} gap-3 animate-fade-in`}>
+        <div className={`w-full mx-auto grid ${gridCols} gap-3 animate-fade-in`}>
           {/* Local Video */}
           <div className="video-container aspect-video relative">
             <video ref={localVideoRef} autoPlay playsInline muted className="w-full h-full object-cover" />
@@ -259,7 +264,7 @@ function RoomPage({
         />
       </main>
 
-      {/* Controls */}
+      {/* Controls — single bar, no duplicates */}
       <div className="relative z-10 flex justify-center pb-6 pt-2">
         <div className="glass px-4 py-3 rounded-2xl flex items-center gap-3">
           <Controls
@@ -268,9 +273,12 @@ function RoomPage({
             onToggleMute={toggleMute}
             onToggleVideo={toggleVideo}
             onLeave={handleLeave}
+            isHost={isHost}
+            onHostEnd={handleHostEnd}
           />
 
           {/* Chat Toggle */}
+          <div className="w-px h-8 bg-dark-500/50" />
           <button
             onClick={() => {
               setChatOpen((v) => !v);
@@ -290,18 +298,6 @@ function RoomPage({
               </span>
             )}
           </button>
-
-          {/* Host End Meeting */}
-          {isHost && (
-            <button
-              onClick={handleHostEnd}
-              className="px-4 h-11 rounded-xl bg-red-500/20 border border-red-500/30 text-red-400 hover:bg-red-500/30 transition-all flex items-center gap-2 text-sm font-medium"
-              title="End Meeting for All"
-            >
-              <PhoneOff size={16} />
-              End All
-            </button>
-          )}
         </div>
       </div>
 

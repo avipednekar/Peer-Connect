@@ -319,7 +319,8 @@ export function useWebRTC(token) {
 
   // ─── Join Room ──────────────────────────────────────
   const joinRoom = useCallback(
-    async (roomId, displayName) => {
+    async (roomId, displayName, mediaSettings = {}) => {
+      const { micOn = true, camOn = true } = mediaSettings;
       const socket = socketRef.current;
       if (!socket) return;
 
@@ -372,10 +373,21 @@ export function useWebRTC(token) {
         if (audioTrack) {
           const audioProducer = await sendTransport.produce({ track: audioTrack });
           producersRef.current.set("audio", audioProducer);
+          // Apply pre-join mic setting
+          if (!micOn) {
+            audioProducer.pause();
+            setIsMuted(true);
+          }
         }
         if (videoTrack) {
           const videoProducer = await sendTransport.produce({ track: videoTrack });
           producersRef.current.set("video", videoProducer);
+          // Apply pre-join camera setting
+          if (!camOn) {
+            videoProducer.pause();
+            videoTrack.enabled = false;
+            setIsVideoOff(true);
+          }
         }
 
         // 6. Consume existing peers' producers
@@ -499,6 +511,8 @@ export function useWebRTC(token) {
     isVideoOff,
     error,
     setError,
+    setIsMuted,
+    setIsVideoOff,
     localVideoRef,
     participants,
     hostId,
