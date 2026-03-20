@@ -20,7 +20,7 @@ export const register = async (req, res) => {
       return res.status(409).json({ error: "Email already registered." });
     }
 
-    // If user exists but not verified, update their details
+    // Build user object but DON'T save yet — send email first
     let user;
     if (existingUser && !existingUser.isVerified) {
       existingUser.name = name;
@@ -31,15 +31,17 @@ export const register = async (req, res) => {
     }
 
     const otp = user.generateOTP();
-    await user.save();
 
-    // Send OTP email
+    // Send OTP email BEFORE saving to avoid trapping the user
     try {
       await sendOTP(email, otp);
     } catch (emailErr) {
       console.error("Email send error:", emailErr);
       return res.status(500).json({ error: "Failed to send verification email. Please try again." });
     }
+
+    // Email sent successfully — now commit user to DB
+    await user.save();
 
     res.status(201).json({
       message: "OTP sent to your email. Please verify to complete registration.",
@@ -107,8 +109,8 @@ export const resendOTP = async (req, res) => {
     }
 
     const otp = user.generateOTP();
-    await user.save();
 
+    // Send email BEFORE saving
     try {
       await sendOTP(email, otp);
     } catch (emailErr) {
@@ -116,6 +118,7 @@ export const resendOTP = async (req, res) => {
       return res.status(500).json({ error: "Failed to resend OTP." });
     }
 
+    await user.save();
     res.json({ message: "New OTP sent to your email." });
   } catch (err) {
     console.error("Resend OTP error:", err);

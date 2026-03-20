@@ -4,6 +4,7 @@ import {
   deleteRoom,
   getRoom,
   createWebRtcTransport,
+  PEER_LIMITS,
 } from "../config/mediasoup.js";
 
 // ─── Online Users ──────────────────────────────────────
@@ -56,6 +57,24 @@ export const setupSocketHandlers = (io) => {
     // 1. Join room — get router RTP capabilities
     socket.on("join-room", async ({ roomId, displayName }, callback) => {
       try {
+        if (!roomId || !displayName) {
+          return callback({ error: "Room ID and display name are required." });
+        }
+
+        // Validate room exists and is active (if a Meeting record exists)
+        const meeting = await Meeting.findOne({ roomId }).sort({ createdAt: -1 });
+        if (meeting && !meeting.isActive) {
+          return callback({ error: "This meeting has ended." });
+        }
+
+        // Check participant cap
+        if (meeting && meeting.settings?.maxParticipants) {
+          const room = getRoom(roomId);
+          if (room && room.peers.size >= meeting.settings.maxParticipants) {
+            return callback({ error: "Meeting is full." });
+          }
+        }
+
         socket.currentRoom = roomId;
         socket.displayName = displayName;
         socket.join(roomId);
@@ -71,19 +90,22 @@ export const setupSocketHandlers = (io) => {
           consumers: new Map(),
         });
 
-        // Update Meeting model
-        await Meeting.findOneAndUpdate(
-          { roomId, isActive: true },
-          {
-            $push: {
-              participants: {
-                userId: socket.userId || null,
-                displayName,
-                socketId: socket.id,
+        // Update Meeting model (atomic push with timestamp)
+        if (meeting) {
+          await Meeting.findOneAndUpdate(
+            { roomId, isActive: true },
+            {
+              $push: {
+                participants: {
+                  userId: socket.userId || null,
+                  displayName,
+                  socketId: socket.id,
+                  joinedAt: new Date(),
+                },
               },
             },
-          },
-        );
+          );
+        }
 
         // Get existing participants for the joiner
         const existingPeers = [];
@@ -99,9 +121,6 @@ export const setupSocketHandlers = (io) => {
             })),
           });
         }
-
-        // Get meeting info for host badge
-        const meeting = await Meeting.findOne({ roomId, isActive: true });
 
         // Send RTP capabilities + existing peers to the joiner
         callback({
@@ -133,7 +152,12 @@ export const setupSocketHandlers = (io) => {
         const peer = room.peers.get(socket.id);
         if (!peer) return callback({ error: "Not in room" });
 
-        const { transport, params } = await createWebRtcTransport(room.router);
+        // Rate limit: cap transports per peer
+        if (peer.transports.size >= PEER_LIMITS.maxTransports) {
+          return callback({ error: "Transport limit reached" });
+        }
+
+        const { transport, params } = await createWebRtcTransport(room.router, direction);
 
         // Store transport by ID
         peer.transports.set(transport.id, transport);
@@ -171,6 +195,11 @@ export const setupSocketHandlers = (io) => {
 
         if (!transport) return callback({ error: "Transport not found" });
 
+        // Rate limit: cap producers per peer
+        if (peer.producers.size >= PEER_LIMITS.maxProducers) {
+          return callback({ error: "Producer limit reached" });
+        }
+
         const producer = await transport.produce({ kind, rtpParameters, appData });
 
         peer.producers.set(producer.id, producer);
@@ -202,15 +231,22 @@ export const setupSocketHandlers = (io) => {
         const peer = room.peers.get(socket.id);
         if (!peer) return callback({ error: "Not in room" });
 
+        // Rate limit: cap consumers per peer
+        if (peer.consumers.size >= PEER_LIMITS.maxConsumers) {
+          return callback({ error: "Consumer limit reached" });
+        }
+
         if (!room.router.canConsume({ producerId, rtpCapabilities })) {
           return callback({ error: "Cannot consume this producer" });
         }
 
-        // Find the receive transport (use last created transport that isn't producer transport)
+        // Find the RECEIVE transport (tagged with direction === "recv")
         let consumerTransport = null;
         for (const transport of peer.transports.values()) {
-          // Use the transport that doesn't have producers on it, or the second transport
-          consumerTransport = transport;
+          if (transport.appData?.direction === "recv") {
+            consumerTransport = transport;
+            break;
+          }
         }
 
         if (!consumerTransport) return callback({ error: "No receive transport" });
@@ -267,7 +303,7 @@ export const setupSocketHandlers = (io) => {
 
       cleanupPeer(roomId, socket.id);
 
-      // Remove from Meeting model
+      // Remove from Meeting model (match by socketId for atomic removal)
       await Meeting.findOneAndUpdate(
         { roomId, isActive: true },
         { $pull: { participants: { socketId: socket.id } } },
@@ -285,6 +321,8 @@ export const setupSocketHandlers = (io) => {
     // 8. Host ends meeting for all
     socket.on("host-end-meeting", async ({ roomId }) => {
       try {
+        if (!socket.userId) return;
+
         const meeting = await Meeting.findOne({ roomId, isActive: true });
         if (!meeting || meeting.host.toString() !== socket.userId) return;
 
@@ -297,12 +335,20 @@ export const setupSocketHandlers = (io) => {
           reason: "Host ended the meeting.",
         });
 
-        // Clean up SFU room
+        // Clean up SFU room — collect peer IDs first, then clean up
         const room = getRoom(roomId);
         if (room) {
-          for (const [peerId] of room.peers) {
-            cleanupPeer(roomId, peerId);
+          const peerIds = Array.from(room.peers.keys());
+          for (const peerId of peerIds) {
+            const peer = room.peers.get(peerId);
+            if (peer) {
+              for (const transport of peer.transports.values()) {
+                transport.close();
+              }
+              room.peers.delete(peerId);
+            }
           }
+          // Now delete the empty room (single call, no redundancy)
           deleteRoom(roomId);
         }
 
@@ -317,6 +363,9 @@ export const setupSocketHandlers = (io) => {
     // ════════════════════════════════════════════════════
 
     socket.on("chat-message", ({ roomId, encryptedData, senderName, timestamp }) => {
+      // Only relay if sender is actually in the room
+      if (socket.currentRoom !== roomId) return;
+
       socket.to(roomId).emit("chat-message", {
         encryptedData,
         senderName,
@@ -330,6 +379,8 @@ export const setupSocketHandlers = (io) => {
     // ════════════════════════════════════════════════════
 
     socket.on("call-friend", ({ friendId, roomId, callerName }) => {
+      if (!socket.userId) return; // Guests can't call friends
+
       const friendSocketId = getPrimarySocketId(friendId);
       if (friendSocketId) {
         io.to(friendSocketId).emit("incoming-call", {
@@ -390,8 +441,9 @@ export const setupSocketHandlers = (io) => {
 
         cleanupPeer(roomId, socket.id);
 
+        // Atomic pull from Meeting — uses socketId for precise matching
         await Meeting.findOneAndUpdate(
-          { roomId, isActive: true },
+          { roomId, isActive: true, "participants.socketId": socket.id },
           { $pull: { participants: { socketId: socket.id } } },
         ).catch(() => {});
 

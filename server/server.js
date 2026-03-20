@@ -1,11 +1,11 @@
 import dotenv from "dotenv";
-dotenv.config();
+dotenv.config({ path: import.meta.dirname + "/../.env" });
 
 import express from "express";
 import { createServer } from "http";
 import { Server } from "socket.io";
 import { connectDB } from "./config/db.js";
-import { createWorker } from "./config/mediasoup.js";
+import { createWorkers } from "./config/mediasoup.js";
 import { authenticateSocket } from "./middleware/auth.js";
 import { setupSocketHandlers } from "./sockets/socketHandlers.js";
 
@@ -18,13 +18,16 @@ import meetingsRoutes from "./routes/meetings.js";
 const app = express();
 const server = createServer(app);
 
+// Parse allowed CORS origins from env
+const corsOrigins = [
+  "http://localhost:5173",
+  ...(process.env.CLIENT_URL ? [process.env.CLIENT_URL] : []),
+];
+
 // Initialize Socket.IO
 const io = new Server(server, {
   cors: {
-    origin: [
-      "http://localhost:5173",
-      "https://pelagial-patchless-xuan.ngrok-free.dev",
-    ],
+    origin: corsOrigins,
     methods: ["GET", "POST"],
   },
 });
@@ -47,7 +50,7 @@ const PORT = process.env.PORT || 4000;
 
 const startServer = async () => {
   await connectDB();
-  await createWorker();
+  await createWorkers();
 
   server.listen(PORT, () => {
     console.log(`🚀 Server running on http://localhost:${PORT}`);

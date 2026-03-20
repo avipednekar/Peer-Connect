@@ -1,4 +1,5 @@
 import mediasoup from "mediasoup";
+import os from "os";
 
 // mediasoup Worker settings
 const workerSettings = {
@@ -66,21 +67,64 @@ const webRtcTransportOptions = {
   maxIncomingBitrate: 1500000,
 };
 
-// ─── Worker & Room Management ──────────────────────────
+// Per-peer limits (rate limiting / DoS protection)
+export const PEER_LIMITS = {
+  maxTransports: 4,   // 2 send + 2 recv (with room for renegotiation)
+  maxProducers: 4,    // audio + video + screen share audio + screen share video
+  maxConsumers: 40,   // consuming from up to ~20 participants × 2 tracks
+};
 
-let worker;
-const rooms = new Map(); // roomId -> { router, peers: Map<socketId, peerData> }
+// ─── Multi-Worker Pool ─────────────────────────────────
 
-export const createWorker = async () => {
-  worker = await mediasoup.createWorker(workerSettings);
+const workers = [];
+let nextWorkerIdx = 0;
+const rooms = new Map(); // roomId -> { router, peers, workerId }
 
-  worker.on("died", () => {
-    console.error("❌ mediasoup Worker died, exiting...");
-    setTimeout(() => process.exit(1), 2000);
+const createSingleWorker = async (index) => {
+  const worker = await mediasoup.createWorker(workerSettings);
+
+  worker.on("died", async () => {
+    console.error(`❌ mediasoup Worker ${index} (pid: ${worker.pid}) died. Respawning...`);
+
+    // Tear down rooms that were on this worker
+    for (const [roomId, room] of rooms) {
+      if (room.workerId === index) {
+        // Notify peers that the room is gone (handled by disconnect events)
+        room.router.close();
+        rooms.delete(roomId);
+        console.warn(`🗑️ Room ${roomId} torn down (worker ${index} died)`);
+      }
+    }
+
+    // Respawn
+    try {
+      workers[index] = await createSingleWorker(index);
+      console.log(`✅ mediasoup Worker ${index} respawned (pid: ${workers[index].pid})`);
+    } catch (err) {
+      console.error(`❌ Failed to respawn worker ${index}:`, err);
+    }
   });
 
-  console.log(`📡 mediasoup Worker created (pid: ${worker.pid})`);
+  console.log(`📡 mediasoup Worker ${index} created (pid: ${worker.pid})`);
   return worker;
+};
+
+export const createWorkers = async () => {
+  const numWorkers = Math.max(1, Math.min(os.cpus().length, 4)); // 1-4 workers
+
+  for (let i = 0; i < numWorkers; i++) {
+    const worker = await createSingleWorker(i);
+    workers.push(worker);
+  }
+
+  console.log(`📡 ${numWorkers} mediasoup worker(s) ready`);
+};
+
+// Round-robin worker selection
+const getNextWorker = () => {
+  const worker = workers[nextWorkerIdx];
+  nextWorkerIdx = (nextWorkerIdx + 1) % workers.length;
+  return { worker, workerIdx: (nextWorkerIdx === 0 ? workers.length : nextWorkerIdx) - 1 };
 };
 
 export const getOrCreateRoom = async (roomId) => {
@@ -88,14 +132,16 @@ export const getOrCreateRoom = async (roomId) => {
     return rooms.get(roomId);
   }
 
+  const { worker, workerIdx } = getNextWorker();
   const router = await worker.createRouter({ mediaCodecs });
   const room = {
     router,
-    peers: new Map(), // socketId -> { transports: Map, producers: Map, consumers: Map, displayName, userId }
+    workerId: workerIdx,
+    peers: new Map(), // socketId -> peer data
   };
 
   rooms.set(roomId, room);
-  console.log(`🏠 Created mediasoup room: ${roomId}`);
+  console.log(`🏠 Created mediasoup room: ${roomId} (worker ${workerIdx})`);
   return room;
 };
 
@@ -110,8 +156,11 @@ export const deleteRoom = (roomId) => {
 
 export const getRoom = (roomId) => rooms.get(roomId);
 
-export const createWebRtcTransport = async (router) => {
+export const createWebRtcTransport = async (router, direction) => {
   const transport = await router.createWebRtcTransport(webRtcTransportOptions);
+
+  // Tag transport with direction for later filtering
+  transport.appData = { direction };
 
   transport.on("dtlsstatechange", (dtlsState) => {
     if (dtlsState === "closed") {
