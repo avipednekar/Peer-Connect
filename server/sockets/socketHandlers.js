@@ -273,6 +273,7 @@ export const setupSocketHandlers = (io) => {
           producerId,
           kind: consumer.kind,
           rtpParameters: consumer.rtpParameters,
+          producerPaused: consumer.producerPaused,
         });
       } catch (err) {
         console.error("consume error:", err);
@@ -294,6 +295,45 @@ export const setupSocketHandlers = (io) => {
       } catch (err) {
         console.error("resume-consumer error:", err);
         callback?.({ error: err.message });
+      }
+    });
+
+    // 6.5 Pause/Resume Producer (Mute/Unmute)
+    socket.on("pause-producer", async ({ roomId, producerId }) => {
+      try {
+        const room = getRoom(roomId);
+        const peer = room?.peers.get(socket.id);
+        const producer = peer?.producers.get(producerId);
+
+        if (producer) {
+          await producer.pause();
+          socket.to(roomId).emit("peer-producer-paused", { 
+            producerId: producer.id, 
+            socketId: socket.id,
+            kind: producer.kind
+          });
+        }
+      } catch (err) {
+        console.error("pause-producer error:", err);
+      }
+    });
+
+    socket.on("resume-producer", async ({ roomId, producerId }) => {
+      try {
+        const room = getRoom(roomId);
+        const peer = room?.peers.get(socket.id);
+        const producer = peer?.producers.get(producerId);
+
+        if (producer) {
+          await producer.resume();
+          socket.to(roomId).emit("peer-producer-resumed", { 
+            producerId: producer.id, 
+            socketId: socket.id,
+            kind: producer.kind
+          });
+        }
+      } catch (err) {
+        console.error("resume-producer error:", err);
       }
     });
 

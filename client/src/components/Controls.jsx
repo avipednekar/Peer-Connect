@@ -1,6 +1,6 @@
-import { Mic, MicOff, Video, VideoOff, PhoneOff, DoorOpen, MonitorUp } from "lucide-react";
+import { Mic, MicOff, Video, VideoOff, PhoneOff, DoorOpen, MonitorUp, Settings } from "lucide-react";
 
-export default function Controls({ isMuted, isVideoOff, onToggleMute, onToggleVideo, onLeave, isHost, onHostEnd }) {
+export default function Controls({ isMuted, isVideoOff, onToggleMute, onToggleVideo, onLeave, isHost, onHostEnd, onOpenSettings }) {
   return (
     <div className="flex items-center gap-2">
       {/* Mute / Unmute */}
@@ -31,6 +31,19 @@ export default function Controls({ isMuted, isVideoOff, onToggleMute, onToggleVi
           {isVideoOff ? <VideoOff size={20} /> : <Video size={20} />}
         </span>
         <span className="meeting-btn-label">{isVideoOff ? "Start Video" : "Stop Video"}</span>
+      </button>
+
+      {/* Device Settings */}
+      <button
+        onClick={onOpenSettings}
+        className="meeting-btn group"
+        title="Device Settings"
+        id="btn-device-settings"
+      >
+        <span className="meeting-btn-icon">
+          <MonitorUp size={20} />
+        </span>
+        <span className="meeting-btn-label">Settings</span>
       </button>
 
       {/* Divider */}

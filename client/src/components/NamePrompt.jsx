@@ -20,30 +20,48 @@ export default function NamePrompt({ defaultName, roomId, onJoin }) {
       .finally(() => setLoading(false));
   }, [roomId]);
 
-  // Start camera preview
+  const [permissionError, setPermissionError] = useState(null);
+
+  const isJoiningRef = useRef(false);
+
+  // Stop tracks on unmount (unless we are joining the room)
   useEffect(() => {
-    let stream = null;
-
-    navigator.mediaDevices.getUserMedia({ video: true, audio: true })
-      .then((s) => {
-        stream = s;
-        setPreviewStream(s);
-        if (videoPreviewRef.current) {
-          videoPreviewRef.current.srcObject = s;
-        }
-      })
-      .catch(() => {
-        // Permissions denied — disable toggles
-        setCamOn(false);
-        setMicOn(false);
-      });
-
     return () => {
-      if (stream) {
-        stream.getTracks().forEach((t) => t.stop());
+      if (previewStream && !isJoiningRef.current) {
+        previewStream.getTracks().forEach((t) => t.stop());
       }
     };
-  }, []);
+  }, [previewStream]);
+
+  const requestPermissions = async () => {
+    try {
+      setPermissionError(null);
+      
+      // HTTPS warning check
+      if (window.location.protocol !== "https:" && window.location.hostname !== "localhost") {
+        console.warn("WebRTC requires HTTPS or localhost. getUserMedia may fail.");
+      }
+
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      setPreviewStream(stream);
+      if (videoPreviewRef.current) {
+        videoPreviewRef.current.srcObject = stream;
+      }
+      setCamOn(true);
+      setMicOn(true);
+    } catch (err) {
+      console.error("Permission error:", err);
+      if (err.name === "NotAllowedError") {
+        setPermissionError("Camera/Mic access denied. Please allow permissions in your browser settings and try again.");
+      } else if (err.name === "NotFoundError") {
+        setPermissionError("No camera or microphone found on this device.");
+      } else {
+        setPermissionError(`Could not access devices: ${err.message}. Note: Mobile requires HTTPS.`);
+      }
+      setCamOn(false);
+      setMicOn(false);
+    }
+  };
 
   // Sync preview with toggles
   useEffect(() => {
@@ -63,11 +81,12 @@ export default function NamePrompt({ defaultName, roomId, onJoin }) {
   const handleSubmit = (e) => {
     e.preventDefault();
     if (!name.trim()) return;
-    // Stop preview — joinRoom will acquire its own stream
-    if (previewStream) {
-      previewStream.getTracks().forEach((t) => t.stop());
-    }
-    onJoin(name.trim(), { micOn, camOn });
+    
+    // Flag this transition so unmount doesn't destroy the stream
+    isJoiningRef.current = true;
+    
+    // Pass the existing stream cleanly into the active room to strictly bypass mobile permission loss
+    onJoin(name.trim(), { micOn, camOn }, previewStream);
   };
 
   if (loading) {
@@ -113,26 +132,49 @@ export default function NamePrompt({ defaultName, roomId, onJoin }) {
         </div>
 
         {/* Camera Preview */}
-        <div className="relative w-full aspect-video rounded-xl overflow-hidden bg-dark-700 mb-4">
+        <div className="relative w-full aspect-video rounded-xl overflow-hidden bg-dark-700 mb-4 flex items-center justify-center flex-col">
           <video
             ref={videoPreviewRef}
             autoPlay
             playsInline
             muted
-            className={`w-full h-full object-cover ${!camOn ? 'hidden' : ''}`}
+            className={`w-full h-full object-cover ${!camOn || !previewStream ? 'hidden' : ''}`}
           />
-          {!camOn && (
-            <div className="absolute inset-0 flex items-center justify-center">
-              <div className="w-20 h-20 rounded-full bg-dark-500/80 flex items-center justify-center">
+          
+          {!previewStream ? (
+            <div className="absolute inset-0 flex flex-col items-center justify-center bg-dark-800/90 p-4 text-center z-20">
+              <div className="w-16 h-16 rounded-full bg-dark-600/50 flex items-center justify-center mb-4 text-gray-400">
+                <VideoOff size={24} />
+              </div>
+              <p className="text-sm text-gray-300 font-medium mb-4">
+                We need access to your camera and microphone.
+              </p>
+              {permissionError && (
+                <div className="mb-4 text-xs text-red-400 bg-red-500/10 border border-red-500/20 p-2.5 rounded-lg w-full max-w-xs">
+                  {permissionError}
+                </div>
+              )}
+              <button
+                type="button"
+                onClick={requestPermissions}
+                className="px-5 py-2.5 bg-accent-600 hover:bg-accent-500 text-white rounded-xl text-sm font-semibold transition-colors"
+              >
+                Enable Camera & Mic
+              </button>
+            </div>
+          ) : !camOn ? (
+            <div className="absolute inset-0 flex items-center justify-center bg-dark-800">
+              <div className="w-20 h-20 rounded-full bg-dark-500/80 flex items-center justify-center shadow-lg">
                 <span className="text-3xl font-display font-bold text-accent-400">
                   {name?.[0]?.toUpperCase() || "?"}
                 </span>
               </div>
             </div>
-          )}
+          ) : null}
 
-          {/* Mic/Cam toggles overlaid on preview */}
-          <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex gap-2">
+          {/* Mic/Cam toggles overlaid on preview (only show if permissions granted) */}
+          {previewStream && (
+            <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex gap-2 z-30">
             <button
               onClick={() => setMicOn((v) => !v)}
               className="w-10 h-10 rounded-xl flex items-center justify-center text-white transition-all"
@@ -150,6 +192,7 @@ export default function NamePrompt({ defaultName, roomId, onJoin }) {
               {camOn ? <Video size={18} /> : <VideoOff size={18} />}
             </button>
           </div>
+          )}
         </div>
 
         <form onSubmit={handleSubmit}>

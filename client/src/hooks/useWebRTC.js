@@ -2,6 +2,21 @@ import { useRef, useState, useCallback, useEffect } from "react";
 import { io } from "socket.io-client";
 import { Device } from "mediasoup-client";
 
+const emitWithTimeout = (socket, event, data, timeoutMs = 15000) => {
+  return new Promise((resolve, reject) => {
+    let timer;
+    const responseHandler = (res) => {
+      clearTimeout(timer);
+      if (res && res.error) reject(new Error(res.error));
+      else resolve(res);
+    };
+    timer = setTimeout(() => {
+      reject(new Error(`Socket timeout on event: ${event}`));
+    }, timeoutMs);
+    socket.emit(event, data, responseHandler);
+  });
+};
+
 export function useWebRTC(token) {
   const [connectionState, setConnectionState] = useState("idle");
   // idle | joining | connected | failed
@@ -12,6 +27,7 @@ export function useWebRTC(token) {
   const [incomingCall, setIncomingCall] = useState(null);
   const [participants, setParticipants] = useState([]); // [{ socketId, displayName, userId, stream }]
   const [hostId, setHostId] = useState(null);
+  const [localStream, setLocalStream] = useState(null);
 
   const localVideoRef = useRef(null);
   const socketRef = useRef(null);
@@ -68,6 +84,25 @@ export function useWebRTC(token) {
         consumer.close();
         consumersRef.current.delete(consumerId);
       }
+    });
+
+    // Peer paused their producer (toggled mute/video)
+    socket.on("peer-producer-paused", ({ socketId, kind }) => {
+      setParticipants((prev) =>
+        prev.map((p) => {
+          if (p.socketId !== socketId) return p;
+          return { ...p, [`is${kind}Paused`]: true };
+        }),
+      );
+    });
+
+    socket.on("peer-producer-resumed", ({ socketId, kind }) => {
+      setParticipants((prev) =>
+        prev.map((p) => {
+          if (p.socketId !== socketId) return p;
+          return { ...p, [`is${kind}Paused`]: false };
+        }),
+      );
     });
 
     // Peer left
@@ -129,19 +164,10 @@ export function useWebRTC(token) {
       if (!roomId) return;
 
       try {
-        const data = await new Promise((resolve, reject) => {
-          socket.emit(
-            "consume",
-            {
-              roomId,
-              producerId,
-              rtpCapabilities: deviceRef.current.rtpCapabilities,
-            },
-            (result) => {
-              if (result.error) reject(new Error(result.error));
-              else resolve(result);
-            },
-          );
+        const data = await emitWithTimeout(socket, "consume", {
+          roomId,
+          producerId,
+          rtpCapabilities: deviceRef.current.rtpCapabilities,
         });
 
         const consumer = await recvTransportRef.current.consume({
@@ -168,7 +194,11 @@ export function useWebRTC(token) {
             }
             newStreams[kind].addTrack(consumer.track);
 
-            return { ...p, streams: newStreams };
+            return { 
+              ...p, 
+              streams: newStreams,
+              [`is${kind}Paused`]: data.producerPaused
+            };
           }),
         );
 
@@ -184,29 +214,14 @@ export function useWebRTC(token) {
     [],
   );
 
-  // ─── Create Send Transport ─────────────────────────
   const createSendTransport = useCallback(async (socket, roomId, device) => {
-    const params = await new Promise((resolve, reject) => {
-      socket.emit("create-transport", { roomId, direction: "send" }, (result) => {
-        if (result.error) reject(new Error(result.error));
-        else resolve(result);
-      });
-    });
+    const params = await emitWithTimeout(socket, "create-transport", { roomId, direction: "send" });
 
     const transport = device.createSendTransport(params);
 
     transport.on("connect", async ({ dtlsParameters }, callback, errback) => {
       try {
-        await new Promise((resolve, reject) => {
-          socket.emit(
-            "connect-transport",
-            { roomId, transportId: transport.id, dtlsParameters },
-            (result) => {
-              if (result.error) reject(new Error(result.error));
-              else resolve(result);
-            },
-          );
-        });
+        await emitWithTimeout(socket, "connect-transport", { roomId, transportId: transport.id, dtlsParameters });
         callback();
       } catch (err) {
         errback(err);
@@ -215,16 +230,7 @@ export function useWebRTC(token) {
 
     transport.on("produce", async ({ kind, rtpParameters, appData }, callback, errback) => {
       try {
-        const result = await new Promise((resolve, reject) => {
-          socket.emit(
-            "produce",
-            { roomId, transportId: transport.id, kind, rtpParameters, appData },
-            (r) => {
-              if (r.error) reject(new Error(r.error));
-              else resolve(r);
-            },
-          );
-        });
+        const result = await emitWithTimeout(socket, "produce", { roomId, transportId: transport.id, kind, rtpParameters, appData });
         callback({ id: result.producerId });
       } catch (err) {
         errback(err);
@@ -242,29 +248,14 @@ export function useWebRTC(token) {
     return transport;
   }, []);
 
-  // ─── Create Recv Transport ─────────────────────────
   const createRecvTransport = useCallback(async (socket, roomId, device) => {
-    const params = await new Promise((resolve, reject) => {
-      socket.emit("create-transport", { roomId, direction: "recv" }, (result) => {
-        if (result.error) reject(new Error(result.error));
-        else resolve(result);
-      });
-    });
+    const params = await emitWithTimeout(socket, "create-transport", { roomId, direction: "recv" });
 
     const transport = device.createRecvTransport(params);
 
     transport.on("connect", async ({ dtlsParameters }, callback, errback) => {
       try {
-        await new Promise((resolve, reject) => {
-          socket.emit(
-            "connect-transport",
-            { roomId, transportId: transport.id, dtlsParameters },
-            (result) => {
-              if (result.error) reject(new Error(result.error));
-              else resolve(result);
-            },
-          );
-        });
+        await emitWithTimeout(socket, "connect-transport", { roomId, transportId: transport.id, dtlsParameters });
         callback();
       } catch (err) {
         errback(err);
@@ -302,11 +293,11 @@ export function useWebRTC(token) {
     sendTransportRef.current = null;
     recvTransportRef.current = null;
 
-    // Stop local tracks
     if (localStreamRef.current) {
       localStreamRef.current.getTracks().forEach((t) => t.stop());
       localStreamRef.current = null;
     }
+    setLocalStream(null);
 
     if (localVideoRef.current) localVideoRef.current.srcObject = null;
 
@@ -319,7 +310,7 @@ export function useWebRTC(token) {
 
   // ─── Join Room ──────────────────────────────────────
   const joinRoom = useCallback(
-    async (roomId, displayName, mediaSettings = {}) => {
+    async (roomId, displayName, mediaSettings = {}, previewStream = null) => {
       const { micOn = true, camOn = true } = mediaSettings;
       const socket = socketRef.current;
       if (!socket) return;
@@ -329,29 +320,28 @@ export function useWebRTC(token) {
         setConnectionState("joining");
         currentRoomRef.current = roomId;
 
-        // 1. Get local media
-        if (localStreamRef.current) {
+        // 1. Get local media (recycle from Lobby if provided to seamlessly prevent permission drops on mobile)
+        if (localStreamRef.current && localStreamRef.current !== previewStream) {
           localStreamRef.current.getTracks().forEach((t) => t.stop());
         }
 
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: true,
-          audio: true,
-        });
+        let stream = previewStream;
+        if (!stream) {
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: true,
+            audio: true,
+          });
+        }
+        
         localStreamRef.current = stream;
-        if (localVideoRef.current) localVideoRef.current.srcObject = stream;
+        setLocalStream(stream);
 
         // 2. Join room — get RTP capabilities + existing peers
-        const { rtpCapabilities, existingPeers, hostId: meetingHostId, error: joinError } =
-          await new Promise((resolve) => {
-            socket.emit("join-room", { roomId, displayName }, resolve);
-          });
-
-        if (joinError) {
-          setError(joinError);
-          setConnectionState("idle");
-          return;
-        }
+        const { rtpCapabilities, existingPeers, hostId: meetingHostId } = await emitWithTimeout(
+          socket,
+          "join-room",
+          { roomId, displayName }
+        );
 
         setHostId(meetingHostId);
 
@@ -445,12 +435,17 @@ export function useWebRTC(token) {
   const toggleMute = useCallback(() => {
     const audioProducer = producersRef.current.get("audio");
     if (!audioProducer) return;
+    const audioTrack = localStreamRef.current?.getAudioTracks()[0];
 
     if (audioProducer.paused) {
+      if (audioTrack) audioTrack.enabled = true;
       audioProducer.resume();
+      socketRef.current?.emit("resume-producer", { roomId: currentRoomRef.current, producerId: audioProducer.id });
       setIsMuted(false);
     } else {
+      if (audioTrack) audioTrack.enabled = false;
       audioProducer.pause();
+      socketRef.current?.emit("pause-producer", { roomId: currentRoomRef.current, producerId: audioProducer.id });
       setIsMuted(true);
     }
   }, []);
@@ -459,12 +454,17 @@ export function useWebRTC(token) {
   const toggleVideo = useCallback(() => {
     const videoProducer = producersRef.current.get("video");
     if (!videoProducer) return;
+    const videoTrack = localStreamRef.current?.getVideoTracks()[0];
 
     if (videoProducer.paused) {
+      if (videoTrack) videoTrack.enabled = true;
       videoProducer.resume();
+      socketRef.current?.emit("resume-producer", { roomId: currentRoomRef.current, producerId: videoProducer.id });
       setIsVideoOff(false);
     } else {
+      if (videoTrack) videoTrack.enabled = false;
       videoProducer.pause();
+      socketRef.current?.emit("pause-producer", { roomId: currentRoomRef.current, producerId: videoProducer.id });
       setIsVideoOff(true);
     }
   }, []);
@@ -527,5 +527,6 @@ export function useWebRTC(token) {
     acceptCall,
     rejectCall,
     socket: socketRef,
+    localStream,
   };
 }
